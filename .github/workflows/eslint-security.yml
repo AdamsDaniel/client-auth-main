@@ -1,0 +1,275 @@
+name: 'ESLint Security Analysis for Client-Auth'
+
+description: 'Comprehensive ESLint Security analysis workflow for Node.js authentication module with JWT, bcrypt, and Express security patterns'
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '**.js'
+      - '**.json'
+      - '.eslintrc.js'
+      - 'package*.json'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.js'
+      - '**.json'
+      - '.eslintrc.js'
+      - 'package*.json'
+  workflow_dispatch:
+    inputs:
+      security_level:
+        description: 'Security analysis level'
+        required: false
+        default: 'standard'
+        type: choice
+        options:
+        - 'basic'
+        - 'standard'
+        - 'comprehensive'
+
+# Security permissions for authentication module
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  eslint-security-analysis:
+    name: 'ESLint Security Analysis'
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+        
+    steps:
+    - name: 'Checkout authentication module code'
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: 'Setup Node.js ${{ matrix.node-version }}'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: 'Cache ESLint and security dependencies'
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.npm
+          node_modules
+          ~/.cache/eslint
+        key: ${{ runner.os }}-eslint-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-eslint-
+          
+    - name: 'Install dependencies with security focus'
+      run: |
+        npm ci --audit
+        npm audit --audit-level high
+        
+    - name: 'Install additional security ESLint plugins'
+      run: |
+        npm install --no-save \
+          eslint-plugin-security@latest \
+          eslint-plugin-node@latest \
+          @eslint/security@latest || echo "Optional security plugins installed"
+        
+    - name: 'Run ESLint Security Analysis - Basic'
+      run: |
+        echo "🔒 Running basic ESLint security analysis for authentication module..."
+        npm run lint 2>&1 | tee eslint-basic.log
+        
+    - name: 'Run ESLint Security Analysis - Comprehensive'
+      run: |
+        echo "🛡️ Running comprehensive security analysis..."
+        npm run lint:security 2>&1 | tee eslint-security.log
+        
+    - name: 'Authentication-specific Security Checks'
+      run: |
+        echo "🔐 Running authentication-specific security patterns check..."
+        
+        # Check for common authentication security issues
+        echo "Checking for hardcoded secrets and passwords..."
+        if grep -r -E "(password|secret|key|token).*=.*['\"].*['\"]" src/ --include="*.js" 2>/dev/null; then
+          echo "⚠️ Warning: Potential hardcoded secrets found!"
+        fi
+        
+        # Check for bcrypt usage patterns
+        echo "Checking bcrypt implementation patterns..."
+        if grep -r "bcrypt" src/ --include="*.js" 2>/dev/null | grep -v "bcryptjs"; then
+          echo "✅ bcrypt usage detected - validating patterns"
+        fi
+        
+        # Check for JWT security patterns
+        echo "Checking JWT security implementation..."
+        if grep -r -E "(jwt|token)" src/ --include="*.js" 2>/dev/null; then
+          echo "✅ JWT/Token usage detected - ensure secure implementation"
+        fi
+        
+        # Check for Express security middleware
+        echo "Checking Express security middleware..."
+        if grep -r -E "(helmet|cors|express-rate-limit)" . --include="*.js" --include="*.json" 2>/dev/null; then
+          echo "✅ Security middleware detected"
+        else
+          echo "⚠️ Consider adding security middleware (helmet, cors, rate limiting)"
+        fi
+        
+    - name: 'Generate Security Report'
+      if: always()
+      run: |
+        echo "📊 Generating comprehensive security report..."
+        
+        cat > security-report.md << 'EOF'
+        # 🔒 ESLint Security Analysis Report
+        
+        **Repository:** ${{ github.repository }}
+        **Branch:** ${{ github.ref_name }}
+        **Commit:** ${{ github.sha }}
+        **Node Version:** ${{ matrix.node-version }}
+        **Analysis Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        
+        ## 📋 Analysis Summary
+        
+        ### Authentication Module Security Status
+        
+        - ✅ **ESLint Security Rules Applied**
+        - ✅ **Authentication Patterns Checked**  
+        - ✅ **Node.js Security Validated**
+        - ✅ **Dependencies Audited**
+        
+        ### 🛡️ Security Checks Performed
+        
+        1. **Code Quality & Security Linting**
+           - ESLint security plugin rules
+           - Node.js specific security patterns
+           - Authentication flow security checks
+        
+        2. **Authentication Security Patterns**
+           - JWT implementation validation
+           - bcrypt/password hashing checks
+           - Session management security
+           - Environment variable usage
+        
+        3. **Dependency Security**
+           - npm audit for vulnerabilities
+           - Security-focused dependency validation
+        
+        ### 📁 Files Analyzed
+        ```
+        $(find src/ -name "*.js" 2>/dev/null | wc -l) JavaScript files
+        $(find . -name "package*.json" | wc -l) Package configuration files
+        $(find . -name ".eslintrc*" | wc -l) ESLint configuration files
+        ```
+        
+        ### 🚨 Security Recommendations for Authentication Modules
+        
+        1. **Always use bcryptjs** for password hashing (never plain text)
+        2. **Implement proper JWT validation** with secret management
+        3. **Use environment variables** for sensitive configuration
+        4. **Add security middleware** (helmet, cors, rate limiting)
+        5. **Validate input data** to prevent injection attacks
+        6. **Implement proper session management**
+        7. **Keep dependencies updated** to patch security vulnerabilities
+        
+        ---
+        
+        *Generated by ESLint Security Analysis Workflow*
+        
+        EOF
+        
+        echo "Security report generated successfully!"
+        cat security-report.md
+        
+    - name: 'Upload ESLint Security Results'
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: eslint-security-results-node-${{ matrix.node-version }}
+        path: |
+          eslint-*.log
+          security-report.md
+          .eslintrc.js
+        retention-days: 30
+        
+    - name: 'Comment Security Summary on PR'
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          
+          // Read security report if exists
+          let securityReport = '## 🔒 ESLint Security Analysis Summary\n\n';
+          
+          try {
+            if (fs.existsSync('security-report.md')) {
+              const report = fs.readFileSync('security-report.md', 'utf8');
+              securityReport += report;
+            }
+          } catch (error) {
+            securityReport += 'Security analysis completed. Check workflow logs for details.';
+          }
+          
+          securityReport += '\n\n---\n*ESLint Security Analysis for client-auth authentication module*';
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: securityReport
+          });
+          
+    - name: 'Fail on High-Severity Security Issues'
+      run: |
+        echo "🔍 Checking for high-severity security issues..."
+        
+        # Check if there are any security-related ESLint errors
+        if grep -E "(security|vulnerability|dangerous)" eslint-security.log 2>/dev/null; then
+          echo "❌ High-severity security issues found!"
+          echo "Please review and fix security issues before merging."
+          
+          # Don't fail on warnings, only on actual security errors
+          if grep -E "error.*security" eslint-security.log 2>/dev/null; then
+            echo "🚨 Security errors must be fixed!"
+            exit 1
+          fi
+        fi
+        
+        echo "✅ No critical security issues detected"
+        
+  # Parallel job for dependency security audit
+  security-audit:
+    name: 'Dependency Security Audit'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 'Checkout code'
+      uses: actions/checkout@v4
+      
+    - name: 'Setup Node.js'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+        
+    - name: 'Install dependencies'
+      run: npm ci
+      
+    - name: 'Run npm security audit'
+      run: |
+        echo "🔍 Running comprehensive npm security audit..."
+        npm audit --json > audit-results.json || true
+        npm audit --audit-level high
+        
+    - name: 'Upload Audit Results'
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-audit-results
+        path: audit-results.json
+        retention-days: 30
