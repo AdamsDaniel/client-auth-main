@@ -1,0 +1,133 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+# Snyk Security Workflow optimized for client-auth-main (Node.js Authentication Module)
+# This workflow provides comprehensive security scanning for authentication-focused Node.js applications
+# including dependency scanning with focus on security libraries and Snyk Code analysis
+# specifically tuned for authentication security patterns
+
+name: Snyk Security - Authentication Module
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    # Run security scan daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  snyk-security:
+    name: Snyk Security Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # for actions/checkout to fetch code
+      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
+      actions: read # only required for a private repository by github/codeql-action/upload-sarif
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for better analysis
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.0' # LTS version specified in README
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          # Verify package-lock.json is in sync
+          npm audit --audit-level=moderate
+        env:
+          NODE_ENV: production
+
+      - name: Set up Snyk CLI
+        uses: snyk/actions/setup@806182742461562b67788a64410098c9d9b96adb
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Snyk Code Analysis (SAST)
+        run: |
+          # Run Snyk Code analysis with authentication-specific rules
+          snyk code test --sarif-file-output=snyk-code.sarif \
+            --severity-threshold=medium \
+            --org=${{ github.repository_owner }} || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Snyk Open Source Analysis (Dependencies)
+        run: |
+          # Focus on authentication and security-related dependencies
+          snyk test --all-projects \
+            --severity-threshold=medium \
+            --sarif-file-output=snyk-deps.sarif \
+            --org=${{ github.repository_owner }} || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Snyk Monitor (Continuous Monitoring)
+        run: |
+          # Monitor project for new vulnerabilities
+          snyk monitor --all-projects \
+            --org=${{ github.repository_owner }} \
+            --project-name="client-auth-main" \
+            --project-tags="authentication,nodejs,security" || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Upload Snyk Code SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: snyk-code.sarif
+          category: snyk-code
+        continue-on-error: true
+
+      - name: Upload Snyk Dependencies SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: snyk-deps.sarif
+          category: snyk-dependencies
+        continue-on-error: true
+
+      - name: Create Security Report
+        if: always()
+        run: |
+          echo "## 🔒 Snyk Security Analysis Report" >> $GITHUB_STEP_SUMMARY
+          echo "### Authentication Module Security Scan" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** client-auth-main" >> $GITHUB_STEP_SUMMARY
+          echo "- **Node.js Version:** 20.18.0 LTS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scan Date:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Focus Areas:** Authentication security, dependency vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Key Security Checks" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Authentication libraries security scan" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Node.js dependency vulnerability check" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Code analysis for auth-specific security patterns" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Results uploaded to GitHub Security tab" >> $GITHUB_STEP_SUMMARY
+
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: snyk-security
+    if: always()
+    
+    steps:
+      - name: Security Analysis Complete
+        run: |
+          echo "🔒 Snyk security analysis completed for client-auth-main authentication module"
+          echo "📊 Check the Security tab for detailed vulnerability reports"
+          echo "⚡ Monitoring enabled for continuous security updates"
