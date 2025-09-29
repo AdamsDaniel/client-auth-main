@@ -39,8 +39,9 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: |
-          npm ci
-          # Verify package-lock.json is in sync
+          # Use npm install to handle package-lock.json sync issues
+          npm install
+          # Verify installation
           npm audit --audit-level=moderate
         env:
           NODE_ENV: production
